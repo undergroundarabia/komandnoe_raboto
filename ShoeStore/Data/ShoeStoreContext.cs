@@ -24,7 +24,6 @@ public class ShoeStoreContext : DbContext
             optionsBuilder.UseSqlServer(ConnectionString);
     }
 
-    // База создаётся скриптом Database/ShoeStoreDb.sql, здесь только описание соответствия
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Role>(e =>

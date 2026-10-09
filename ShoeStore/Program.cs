@@ -1,11 +1,17 @@
 using System.Globalization;
 using System.Text;
+using NLog;
 using ShoeStore.Data;
+using ShoeStore.Infrastructure;
 using ShoeStore.Models;
 using ShoeStore.Services;
 
 Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = Encoding.UTF8;
+
+ExceptionHandler.Register();
+Logger logger = LogManager.GetLogger("ShoeStore.Program");
+logger.Info("Приложение запущено");
 
 await using var context = new ShoeStoreContext();
 var catalogService = new ProductCatalogService(context);
@@ -14,8 +20,9 @@ try
 {
     if (!await context.Database.CanConnectAsync())
     {
-        Console.WriteLine("не получилось подключиться к базе");
-        Console.WriteLine("выполните скрипт Database/ShoeStoreDb.sql");
+        logger.Error("Нет подключения к базе данных ShoeStoreDb");
+        ConsoleMessage.Error("Не получилось подключиться к базе. Выполните скрипт Database/ShoeStoreDb.sql " +
+                             "и проверьте, что SQL Server LocalDB запущен.");
         return;
     }
 
@@ -23,8 +30,12 @@ try
 }
 catch (Exception exception)
 {
-    Console.WriteLine("ошибка при работе с бд:");
-    Console.WriteLine(exception.Message);
+    ExceptionHandler.Handle(exception, "Работа с базой данных");
+}
+finally
+{
+    logger.Info("Приложение завершено");
+    LogManager.Shutdown();
 }
 
 static async Task RunMenuAsync(ProductCatalogService catalogService)
@@ -34,6 +45,7 @@ static async Task RunMenuAsync(ProductCatalogService catalogService)
         PrintMenu();
         string? command = Console.ReadLine()?.Trim();
         Console.WriteLine();
+        string actionName = GetActionName(command);
 
         try
         {
@@ -74,13 +86,13 @@ static async Task RunMenuAsync(ProductCatalogService catalogService)
                     Console.WriteLine("всё пока");
                     return;
                 default:
-                    Console.WriteLine("неправильно, попробуйте ещё раз");
+                    ConsoleMessage.Warning("Такого пункта меню нет. Введите число от 0 до 9.");
                     break;
             }
         }
         catch (Exception exception)
         {
-            Console.WriteLine($"операция не выполнена: {exception.Message}");
+            ExceptionHandler.Handle(exception, actionName);
         }
 
         Console.WriteLine();
@@ -131,7 +143,7 @@ static async Task AddProductAsync(ProductCatalogService catalogService)
         input.Name, input.Description, input.Composition, input.Price,
         input.CategoryId, input.ManufacturerId);
 
-    Console.WriteLine($"товар успешно добавлен, ID = {productId}");
+    ConsoleMessage.Info($"Товар успешно добавлен, ID = {productId}");
 }
 
 static async Task UpdateProductAsync(ProductCatalogService catalogService)
@@ -144,13 +156,16 @@ static async Task UpdateProductAsync(ProductCatalogService catalogService)
         productId, input.Name, input.Description, input.Composition, input.Price,
         input.CategoryId, input.ManufacturerId);
 
-    Console.WriteLine(updated ? "товар успешно изменён" : "товара с таким айди нет");
+    if (updated)
+        ConsoleMessage.Info("Товар успешно изменён");
+    else
+        ConsoleMessage.Warning($"Товар с ID {productId} не найден. Проверьте номер в списке товаров (пункт 1).");
 }
 
 static async Task DeleteProductAsync(ProductCatalogService catalogService)
 {
     int productId = ReadPositiveInt("введите айди товара для удаления: ");
-    Console.Write("точно удалить товар? (да или нет): ");
+    Console.Write("точно удалить товар? Действие нельзя отменить (да или нет): ");
 
     if (!string.Equals(Console.ReadLine()?.Trim(), "да", StringComparison.OrdinalIgnoreCase))
     {
@@ -159,7 +174,10 @@ static async Task DeleteProductAsync(ProductCatalogService catalogService)
     }
 
     bool deleted = await catalogService.DeleteProductAsync(productId);
-    Console.WriteLine(deleted ? "товар успешно удалён" : "товар с таким ID не найден");
+    if (deleted)
+        ConsoleMessage.Info("Товар успешно удалён");
+    else
+        ConsoleMessage.Warning($"Товар с ID {productId} не найден. Проверьте номер в списке товаров (пункт 1).");
 }
 
 static async Task PrintReferenceDataAsync(ProductCatalogService catalogService)
@@ -225,6 +243,19 @@ static decimal ReadPositiveDecimal(string prompt)
         Console.WriteLine("введите цену больше нуля");
     }
 }
+
+static string GetActionName(string? command) => command switch
+{
+    "1" => "Просмотр всех товаров",
+    "2" => "Поиск товара по названию",
+    "3" => "Фильтрация по категории",
+    "4" or "5" => "Сортировка по цене",
+    "6" => "Постраничный просмотр",
+    "7" => "Добавление товара",
+    "8" => "Изменение товара",
+    "9" => "Удаление товара",
+    _ => "Выбор пункта меню"
+};
 
 static void PrintMenu()
 {

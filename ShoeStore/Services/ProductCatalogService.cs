@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using NLog;
 using ShoeStore.Data;
+using ShoeStore.Exceptions;
 using ShoeStore.Models;
 
 namespace ShoeStore.Services;
@@ -12,6 +14,8 @@ public record ProductPage(
 
 public class ProductCatalogService
 {
+    private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
     private readonly ShoeStoreContext _context;
 
     public ProductCatalogService(ShoeStoreContext context)
@@ -28,6 +32,7 @@ public class ProductCatalogService
 
     public Task<List<Product>> SearchByNameAsync(string searchText)
     {
+        Logger.Debug("Поиск товаров по названию: «{Text}»", searchText);
         return CreateCatalogQuery()
             .Where(product => product.Name.Contains(searchText))
             .OrderBy(product => product.Name)
@@ -36,6 +41,7 @@ public class ProductCatalogService
 
     public Task<List<Product>> FilterByCategoryAsync(string categoryName)
     {
+        Logger.Debug("Фильтрация по категории: «{Category}»", categoryName);
         return CreateCatalogQuery()
             .Where(product => product.Category.Name.Contains(categoryName))
             .OrderBy(product => product.Name)
@@ -112,6 +118,8 @@ public class ProductCatalogService
 
         _context.Products.Add(product);
         await _context.SaveChangesAsync();
+
+        Logger.Info("Добавлен товар {ProductId} «{Name}», цена {Price}", product.ProductId, product.Name, product.Price);
         return product.ProductId;
     }
 
@@ -129,7 +137,10 @@ public class ProductCatalogService
 
         Product? product = await _context.Products.FindAsync(productId);
         if (product is null)
+        {
+            Logger.Warn("Изменение: товар {ProductId} не найден", productId);
             return false;
+        }
 
         product.Name = name.Trim();
         product.Description = NormalizeOptionalText(description);
@@ -139,6 +150,8 @@ public class ProductCatalogService
         product.ManufacturerId = manufacturerId;
 
         await _context.SaveChangesAsync();
+
+        Logger.Info("Изменён товар {ProductId} «{Name}»", productId, product.Name);
         return true;
     }
 
@@ -146,10 +159,15 @@ public class ProductCatalogService
     {
         Product? product = await _context.Products.FindAsync(productId);
         if (product is null)
+        {
+            Logger.Warn("Удаление: товар {ProductId} не найден", productId);
             return false;
+        }
 
         _context.Products.Remove(product);
         await _context.SaveChangesAsync();
+
+        Logger.Info("Удалён товар {ProductId} «{Name}»", productId, product.Name);
         return true;
     }
 
@@ -166,19 +184,19 @@ public class ProductCatalogService
     private async Task ValidateReferencesAsync(int categoryId, int manufacturerId)
     {
         if (!await _context.Categories.AnyAsync(category => category.CategoryId == categoryId))
-            throw new ArgumentException("категория с таким ID не найдена");
+            throw new EntityNotFoundException("Категория", categoryId);
 
         if (!await _context.Manufacturers.AnyAsync(manufacturer => manufacturer.ManufacturerId == manufacturerId))
-            throw new ArgumentException("производитель с таким ID не найден");
+            throw new EntityNotFoundException("Производитель", manufacturerId);
     }
 
     private static void ValidateProduct(string name, decimal price)
     {
         if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("название товара не может быть пустым");
+            throw new InvalidInputException("Название", "значение не может быть пустым.");
 
         if (price <= 0)
-            throw new ArgumentException("цена должна быть больше нуля");
+            throw new InvalidInputException("Цена", "значение должно быть больше нуля.");
     }
 
     private static string? NormalizeOptionalText(string? value)
